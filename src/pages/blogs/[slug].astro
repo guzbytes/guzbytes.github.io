@@ -1,0 +1,33 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { getCollection, getEntryBySlug } from 'astro:content';
+import type { APIContext } from 'astro';
+
+export async function getStaticPaths() {
+  const blogs = await getCollection('blogs');
+  return blogs.map((blog) => ({
+    params: { slug: blog.slug },
+    props: { slug: blog.slug },
+  }));
+}
+
+interface Props {
+  slug: string;
+}
+
+const { slug } = Astro.props as Props;
+const blog = await getEntryBySlug('blogs', slug);
+
+if (!blog) {
+  throw new Error(`No se encontró el blog con slug: ${slug}`);
+}
+---
+
+<Layout title={blog.data.title}>
+  <article>
+    <h2>{blog.data.title}</h2>
+    <h3>{blog.data.description}</h3>
+    <p>{blog.body}</p>
+    <p class="pub-date"><em>{blog.data.pubDate}</em></p>
+  </article>
+</Layout>

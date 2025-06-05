@@ -1,0 +1,14 @@
+---
+import BaseLayout from '../layouts/Layout.astro';
+import { getCollection } from 'astro:content';
+const blogs = await getCollection('blogs');
+---
+
+<BaseLayout title="Blogs - GuzBytes">
+  <h2>Blogs</h2>
+  <ul>
+    {blogs.map(blog => (
+      <li><a class="blog-link" href={`/blogs/${blog.slug}`}>{blog.data.title}</a></li>
+    ))}
+  </ul>
+</BaseLayout>
