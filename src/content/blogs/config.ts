@@ -5,6 +5,7 @@ const blogCollection = defineCollection({
     title: z.string(),
     description: z.string().optional(),
     pubDate: z.string(),
+    category: z.enum(['random-tech', 'cyber', 'certs']),
   }),
 });
 

@@ -3,7 +3,65 @@ import Layout from '../layouts/Layout.astro';
 ---
 
 <Layout title="Welcome to Guzbytes">
-  <h1>👋 Hey, I'm Guzbytes</h1>
-  <p>Welcome to my cyber lab. Here I write about hacking, Linux, infosec and tools I build or break.</p>
-  <p>Still under contruction.</p>
+  <section class="terminal-window">
+    <div class="terminal-bar">
+      <span class="dot red"></span>
+      <span class="dot yellow"></span>
+      <span class="dot green"></span>
+      <span class="terminal-title">guzbytes@madrid:~$</span>
+    </div>
+
+    <div class="terminal-body">
+      <p class="line"><span class="prompt">$</span> whoami</p>
+      <div class="profile-row">
+        <img
+          src="https://github.com/guzbytes.png"
+          alt="Adrián Guzmán García"
+          class="avatar"
+          width="72"
+          height="72"
+        />
+        <div>
+          <p class="name">Adrián Guzmán García</p>
+          <p class="role">Penetration Tester · Madrid, Spain</p>
+        </div>
+      </div>
+
+      <p class="line"><span class="prompt">$</span> cat about.txt</p>
+      <p class="about-text">
+        Telematics Engineer turned offensive security specialist. I spend my days breaking web apps,
+        mobile apps, internal networks and Active Directory environments professionally — and my
+        free time doing the same thing on Hack The Box and CTFs, just for fun.
+      </p>
+
+      <p class="line"><span class="prompt">$</span> ls certifications/</p>
+      <ul class="cert-list">
+        <li>OSEP — OffSec Experienced Penetration Tester</li>
+        <li>HTB CWES — Certified Web Exploitation Specialist</li>
+        <li>CRTO — Certified Red Team Operator</li>
+        <li>BSCP — Burp Suite Certified Practitioner</li>
+        <li>MCTRA — Multi-Cloud Red Team Analyst</li>
+        <li>OSCP — OffSec Certified Professional</li>
+        <li>CEH — Certified Ethical Hacker</li>
+        <li>AWS Security Fundamentals</li>
+        <li>LPIC-1 — Certified Linux Administrator</li>
+        <li>Azure Administrator Associate</li>
+      </ul>
+
+      <p class="line"><span class="prompt">$</span> ls links/</p>
+      <p class="links">
+        <a href="https://github.com/guzbytes" target="_blank" rel="noopener noreferrer">github.com/guzbytes</a>
+        <span class="sep">·</span>
+        <a href="https://www.linkedin.com/in/adri%C3%A1n-guzm%C3%A1n-garc%C3%ADa/" target="_blank" rel="noopener noreferrer">linkedin</a>
+        <span class="sep">·</span>
+        <a href="/cyber">cyber</a>
+        <span class="sep">·</span>
+        <a href="/random-tech">random-tech</a>
+        <span class="sep">·</span>
+        <a href="/certs">certs</a>
+      </p>
+
+      <p class="line"><span class="prompt">$</span> <span class="cursor">_</span></p>
+    </div>
+  </section>
 </Layout>

@@ -1,0 +1,37 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { getCollection } from 'astro:content';
+
+const categories = {
+  'random-tech': 'Random Tech',
+  cyber: 'Cyber',
+  certs: 'Certs',
+};
+
+export async function getStaticPaths() {
+  return ['random-tech', 'cyber', 'certs'].map((category) => ({
+    params: { category },
+  }));
+}
+
+const { category } = Astro.params as { category: keyof typeof categories };
+const label = categories[category];
+
+const allBlogs = await getCollection('blogs');
+const posts = allBlogs
+  .filter((post) => post.data.category === category)
+  .sort((a, b) => new Date(b.data.pubDate).getTime() - new Date(a.data.pubDate).getTime());
+---
+
+<Layout title={`${label} - GuzBytes`}>
+  <p class="line"><span class="prompt">$</span> ls {category}/</p>
+  {posts.length > 0 ? (
+    <ul class="cert-list">
+      {posts.map((post) => (
+        <li><a class="blog-link" href={`/${category}/${post.slug}`}>{post.data.title}</a></li>
+      ))}
+    </ul>
+  ) : (
+    <p class="about-text">No posts yet. Check back later.</p>
+  )}
+</Layout>

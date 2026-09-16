@@ -1,0 +1,24 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { getCollection } from 'astro:content';
+
+export async function getStaticPaths() {
+  const blogs = await getCollection('blogs');
+  return blogs.map((blog) => ({
+    params: { category: blog.data.category, slug: blog.slug },
+    props: { blog },
+  }));
+}
+
+const { blog } = Astro.props;
+const { Content } = await blog.render();
+---
+
+<Layout title={`${blog.data.title} - GuzBytes`}>
+  <article class="blog-content">
+    <h2>{blog.data.title}</h2>
+    {blog.data.description && <h3>{blog.data.description}</h3>}
+    <p class="pub-date"><em>{blog.data.pubDate}</em></p>
+    <Content />
+  </article>
+</Layout>

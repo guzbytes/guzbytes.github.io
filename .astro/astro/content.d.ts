@@ -148,6 +148,13 @@ declare module 'astro:content' {
   collection: "blogs";
   data: any
 } & { render(): Render[".md"] };
+"vault-1-13-1-vulnerabilities.md": {
+	id: "vault-1-13-1-vulnerabilities.md";
+  slug: "vault-1-13-1-vulnerabilities";
+  body: string;
+  collection: "blogs";
+  data: any
+} & { render(): Render[".md"] };
 };
 
 	};
